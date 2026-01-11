@@ -1,0 +1,103 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g., v1.2.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================
+  # Extract Version from Tag
+  # ============================================
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ inputs.tag }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION (tag: $TAG)"
+
+  # ============================================
+  # Build Binaries (reusable workflow)
+  # ============================================
+  build-binaries:
+    name: Build Binaries
+    needs: prepare
+    uses: ./.github/workflows/_build-binaries.yml
+    with:
+      ref: ${{ needs.prepare.outputs.tag }}
+      upload-artifacts: true
+      artifact-retention-days: 1
+
+  # ============================================
+  # Create GitHub Release with All Assets
+  # ============================================
+  create-github-release:
+    name: Create GitHub Release
+    needs: [prepare, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Extract release notes from CHANGELOG
+        id: release_notes
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          # The changelog format is: ## [version](url) (date)
+          # We want everything between this version header and the next ## header
+
+          # Use awk to extract the section
+          NOTES=$(awk -v ver="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "[" ver "]")) found=1
+              next
+            }
+            found { print }
+          ' CHANGELOG.md)
+
+          # If no notes found, use a default message
+          if [ -z "$NOTES" ]; then
+            NOTES="Release v$VERSION"
+          fi
+
+          # Write to file to handle multiline content
+          echo "$NOTES" > release_notes.md
+          echo "Release notes extracted for v$VERSION"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          body_path: release_notes.md
+          files: artifacts/**/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,22 @@
+{
+  "name": "webxash3d-proxy-client",
+  "version": "0.1.0",
+  "description": "Web client for webxash3d-proxy",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "0.25.11",
+    "jszip": "3.10.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.0.0",
+    "vite-plugin-static-copy": "^2.2.0",
+    "xash3d-fwgs": "latest"
+  },
+  "dependencies": {
+    "cs16-client": "^0.1.2"
+  }
+}

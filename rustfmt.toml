@@ -1,0 +1,11 @@
+# Rustfmt configuration for consistent code formatting
+# Run with: cargo fmt
+
+edition = "2021"
+
+# Line width
+max_width = 100
+
+# Formatting
+use_field_init_shorthand = true
+use_try_shorthand = true

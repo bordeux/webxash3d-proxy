@@ -1,0 +1,57 @@
+[package]
+name = "webxash3d-proxy"
+version = "0.0.1"
+edition = "2021"
+description = "WebRTC to UDP proxy for CS 1.6 / Half-Life"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# WebRTC
+webrtc = "0.11"
+
+# WebSocket
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+futures = "0.3"
+bytes = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dashmap = "5"
+uuid = { version = "1", features = ["v4"] }
+
+# CLI args
+clap = { version = "4", features = ["derive", "env"] }
+
+# Embedded assets
+rust-embed = { version = "8", features = ["include-exclude"] }
+mime_guess = "2"
+
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[lints.clippy]
+# Correctness - these are almost always bugs
+correctness = { level = "deny", priority = -1 }
+
+# Pedantic - stricter lints for better code quality
+pedantic = { level = "warn", priority = -1 }
+
+# Restriction - selectively enable useful ones
+dbg_macro = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Relax some overly strict pedantic lints
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"

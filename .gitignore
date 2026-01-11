@@ -1,2 +1,7 @@
 /target
 /dist
+.idea
+*.zip
+
+# Node.js (for semantic-release)
+/node_modules
