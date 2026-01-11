@@ -7,20 +7,19 @@ A Rust WebRTC-to-UDP proxy that allows browser clients running Xash3D WASM to co
 ```
 webxash3d-proxy/
 ├── src/                    # Rust proxy server
-│   ├── main.rs
-│   ├── config.rs
-│   ├── signaling.rs
-│   └── bridge.rs
+│   ├── main.rs             # HTTP server, /config endpoint
+│   ├── config.rs           # CLI args, env vars
+│   ├── signaling.rs        # WebRTC signaling, data channels
+│   └── bridge.rs           # UDP <-> WebRTC forwarding
 ├── client/                 # Web client (TypeScript/Vite)
 │   ├── src/
-│   │   ├── index.html
-│   │   ├── main.ts
-│   │   └── webrtc.ts
+│   │   ├── index.html      # UI, canvas, login form
+│   │   ├── main.ts         # Game initialization
+│   │   ├── webrtc.ts       # WebRTC connection
+│   │   └── valve.zip       # Half-Life base assets (you provide)
 │   ├── package.json
 │   └── vite.config.ts
 ├── dist/                   # Built client (after npm run build)
-├── scripts/
-│   └── setup-client.sh
 ├── Cargo.toml
 └── Dockerfile
 ```
@@ -49,38 +48,32 @@ cargo build --release
 ```bash
 cd client
 npm install
+```
+
+### 3. Add valve.zip
+
+The build requires `valve.zip` (Half-Life base assets). Place it in `client/src/`:
+
+```bash
+# Create valve.zip from your Half-Life installation
+cd /path/to/Half-Life
+zip -r valve.zip valve/
+cp valve.zip /path/to/webxash3d-proxy/client/src/
+```
+
+### 4. Build the client
+
+```bash
+cd client
 npm run build
-cd ..
 ```
 
-Or use the helper script:
-```bash
-./scripts/setup-client.sh
-```
+This automatically copies to `dist/`:
+- All WASM files from `xash3d-fwgs` package (engine, menu, filesystem, renderers)
+- CS 1.6 client files from `cs16-client` package (client.wasm, extras.pk3)
+- valve.zip, favicon, logo
 
-### 3. Add game assets to `dist/`
-
-After building, add these files to the `dist/` directory:
-
-```
-dist/
-├── index.html          # (built by vite)
-├── assets/             # (built by vite)
-├── valve.zip           # Half-Life base assets
-├── mainui.wasm         # From client/node_modules/xash3d-fwgs/
-├── filesystem_stdio.wasm
-└── cstrike/
-    ├── cl_dlls/
-    │   └── client.wasm
-    └── extras.pk3
-```
-
-Copy WASM files:
-```bash
-cp client/node_modules/xash3d-fwgs/*.wasm dist/
-```
-
-### 4. Run the proxy
+### 5. Run the proxy
 
 ```bash
 ./target/release/webxash3d-proxy \
@@ -121,6 +114,8 @@ Options:
 
 ## Server Requirements
 
+### ReUnion Module
+
 The game server needs **ReUnion** module to accept non-Steam clients (protocol 47/48).
 
 Recommended `reunion.cfg`:
@@ -130,9 +125,21 @@ ServerInfoAnswerType 1
 FixBuggedQuery 1
 ```
 
+### Fast Download (Recommended)
+
+If your server has custom content (maps, sounds, models), configure HTTP fast download to avoid slow UDP transfers:
+
+```
+// server.cfg
+sv_downloadurl "http://your-fastdl-server.com/cstrike/"
+sv_allowdownload 1
+```
+
+Without this, custom file downloads may timeout in the browser client.
+
 ## Docker
 
-```dockerfile
+```bash
 # Build everything
 docker build -t webxash3d-proxy .
 
@@ -155,6 +162,13 @@ cd client
 npm run dev
 ```
 
+## NPM Packages Used
+
+| Package | Description |
+|---------|-------------|
+| `xash3d-fwgs` | Xash3D engine compiled to WASM (xash.wasm, libmenu.wasm, filesystem_stdio.wasm, renderers) |
+| `cs16-client` | CS 1.6 client compiled to WASM (client.wasm, extras.pk3) |
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -162,7 +176,9 @@ npm run dev
 | WebRTC fails | Check firewall, try `--public-ip` flag |
 | No server response | Verify server address `ip:port` |
 | Instant disconnect | Install ReUnion on game server |
-| WASM 404 errors | Check file paths match `/config` response |
+| WASM 404 errors | Run `npm run build` in client/ |
+| File download timeout | Configure `sv_downloadurl` on game server |
+| "Unsupported Extension Type" warnings | Safe to ignore (WebRTC SCTP extensions) |
 
 ## License
 
