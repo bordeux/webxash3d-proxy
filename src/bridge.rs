@@ -59,8 +59,6 @@ impl Bridge {
 
     /// Start bidirectional forwarding
     pub async fn start(self: Arc<Self>) {
-        let self_clone = self.clone();
-
         // Spawn UDP → WebRTC forwarder (server responses to browser via write channel)
         let udp_to_webrtc = tokio::spawn({
             let bridge = self.clone();
@@ -70,7 +68,7 @@ impl Bridge {
         });
 
         // Setup WebRTC → UDP forwarder (browser commands to server via read channel)
-        self_clone.setup_webrtc_to_udp();
+        self.setup_webrtc_to_udp();
 
         // Wait for shutdown signal
         self.shutdown.notified().await;

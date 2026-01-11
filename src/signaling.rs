@@ -1,3 +1,6 @@
+//! WebRTC signaling over WebSocket for game client connections.
+
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -22,6 +25,13 @@ use webrtc::peer_connection::RTCPeerConnection;
 use crate::bridge::Bridge;
 use crate::config::Config;
 
+/// Signal event type constants
+mod events {
+    pub const OFFER: &str = "offer";
+    pub const ANSWER: &str = "answer";
+    pub const CANDIDATE: &str = "candidate";
+}
+
 /// WebSocket signaling message
 #[derive(Debug, Serialize, Deserialize)]
 struct SignalMessage {
@@ -29,13 +39,18 @@ struct SignalMessage {
     data: serde_json::Value,
 }
 
+/// Type alias for the WebSocket sender wrapped in Arc<Mutex>
+type WsSender = Arc<Mutex<futures::stream::SplitSink<WebSocket, Message>>>;
+
+/// Type alias for the bridge holder
+type BridgeHolder = Arc<Mutex<Option<Arc<Bridge>>>>;
+
 /// Handle a new WebSocket connection for WebRTC signaling
-#[allow(clippy::too_many_lines)]
 pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id: String) {
     info!(client_id = %client_id, "New WebSocket connection");
 
     let (ws_sender, ws_receiver) = socket.split();
-    let ws_sender = Arc::new(Mutex::new(ws_sender));
+    let ws_sender: WsSender = Arc::new(Mutex::new(ws_sender));
 
     // Create WebRTC peer connection
     let peer = match create_peer_connection(config.public_ip.clone()).await {
@@ -46,8 +61,49 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
         }
     };
 
-    // Create data channels for game data
-    // Using ordered mode for reliable file downloads from game server
+    // Create data channels
+    let Some((write_channel, read_channel)) = create_data_channels(&peer, &client_id).await else {
+        return;
+    };
+
+    info!(client_id = %client_id, "Created write and read data channels");
+
+    // Setup bridge management
+    let bridge: BridgeHolder = Arc::new(Mutex::new(None));
+
+    // Setup callbacks
+    setup_bridge_callbacks(
+        &write_channel,
+        &read_channel,
+        config.clone(),
+        client_id.clone(),
+        bridge.clone(),
+    );
+
+    setup_ice_handler(&peer, ws_sender.clone(), client_id.clone());
+    setup_connection_monitor(&peer, bridge.clone(), client_id.clone());
+
+    // Send offer to client
+    if !send_offer(&peer, &ws_sender, &client_id).await {
+        return;
+    }
+
+    // Handle incoming WebSocket messages
+    handle_ws_messages(ws_receiver, peer, client_id.clone()).await;
+
+    // Cleanup
+    if let Some(b) = bridge.lock().await.take() {
+        b.shutdown();
+    }
+
+    info!(client_id = %client_id, "WebSocket connection closed");
+}
+
+/// Create write and read data channels for game communication
+async fn create_data_channels(
+    peer: &Arc<RTCPeerConnection>,
+    client_id: &str,
+) -> Option<(Arc<RTCDataChannel>, Arc<RTCDataChannel>)> {
     let dc_options = RTCDataChannelInit {
         ordered: Some(true),
         ..Default::default()
@@ -61,7 +117,7 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
         Ok(dc) => dc,
         Err(e) => {
             error!(client_id = %client_id, error = %e, "Failed to create write channel");
-            return;
+            return None;
         }
     };
 
@@ -70,216 +126,197 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
         Ok(dc) => dc,
         Err(e) => {
             error!(client_id = %client_id, error = %e, "Failed to create read channel");
-            return;
+            return None;
         }
     };
 
-    info!(client_id = %client_id, "Created write and read data channels");
+    Some((write_channel, read_channel))
+}
 
-    // Setup bridge when both channels are open
-    let bridge: Arc<Mutex<Option<Arc<Bridge>>>> = Arc::new(Mutex::new(None));
-    let channels_open = Arc::new(std::sync::atomic::AtomicU8::new(0));
+/// Setup callbacks to start the bridge when both channels are open
+fn setup_bridge_callbacks(
+    write_channel: &Arc<RTCDataChannel>,
+    read_channel: &Arc<RTCDataChannel>,
+    config: Arc<Config>,
+    client_id: String,
+    bridge: BridgeHolder,
+) {
+    let channels_open = Arc::new(AtomicU8::new(0));
 
-    // Track channel opens and start bridge when both are ready
-    {
+    // Setup write channel on_open callback
+    setup_channel_on_open(
+        write_channel,
+        channels_open.clone(),
+        config.clone(),
+        client_id.clone(),
+        bridge.clone(),
+        write_channel.clone(),
+        read_channel.clone(),
+    );
+
+    // Setup read channel on_open callback
+    setup_channel_on_open(
+        read_channel,
+        channels_open,
+        config,
+        client_id,
+        bridge,
+        write_channel.clone(),
+        read_channel.clone(),
+    );
+}
+
+/// Setup the `on_open` callback for a data channel
+fn setup_channel_on_open(
+    channel: &Arc<RTCDataChannel>,
+    channels_open: Arc<AtomicU8>,
+    config: Arc<Config>,
+    client_id: String,
+    bridge: BridgeHolder,
+    write_channel: Arc<RTCDataChannel>,
+    read_channel: Arc<RTCDataChannel>,
+) {
+    channel.on_open(Box::new(move || {
+        let channels_open = channels_open.clone();
         let config = config.clone();
         let client_id = client_id.clone();
         let bridge = bridge.clone();
-        let write_channel_for_bridge = write_channel.clone();
-        let read_channel_for_bridge = read_channel.clone();
-        let channels_open = channels_open.clone();
+        let write_channel = write_channel.clone();
+        let read_channel = read_channel.clone();
 
-        let start_bridge = move |channels_open: Arc<std::sync::atomic::AtomicU8>,
-                                 config: Arc<Config>,
-                                 client_id: String,
-                                 bridge: Arc<Mutex<Option<Arc<Bridge>>>>,
-                                 write_channel: Arc<RTCDataChannel>,
-                                 read_channel: Arc<RTCDataChannel>| {
-            Box::pin(async move {
-                let count = channels_open.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
-                if count == 2 {
-                    info!(client_id = %client_id, "Both channels open, starting bridge");
+        Box::pin(async move {
+            let count = channels_open.fetch_add(1, Ordering::SeqCst) + 1;
+            if count == 2 {
+                start_bridge(config, client_id, bridge, write_channel, read_channel).await;
+            }
+        })
+    }));
+}
 
-                    match Bridge::new(
-                        write_channel,
-                        read_channel,
-                        &config.server,
-                        client_id.clone(),
-                    )
-                    .await
-                    {
-                        Ok(b) => {
-                            let b = Arc::new(b);
-                            *bridge.lock().await = Some(b.clone());
-                            tokio::spawn(async move {
-                                b.start().await;
-                            });
-                        }
-                        Err(e) => {
-                            error!(client_id = %client_id, error = %e, "Failed to create bridge");
-                        }
-                    }
-                }
-            })
-        };
+/// Start the UDP bridge when both channels are ready
+async fn start_bridge(
+    config: Arc<Config>,
+    client_id: String,
+    bridge: BridgeHolder,
+    write_channel: Arc<RTCDataChannel>,
+    read_channel: Arc<RTCDataChannel>,
+) {
+    info!(client_id = %client_id, "Both channels open, starting bridge");
 
-        // Setup write channel on_open
-        let config_clone = config.clone();
-        let client_id_clone = client_id.clone();
-        let bridge_clone = bridge.clone();
-        let write_for_cb = write_channel_for_bridge.clone();
-        let read_for_cb = read_channel_for_bridge.clone();
-        let channels_open_clone = channels_open.clone();
-
-        write_channel.on_open(Box::new(move || {
-            let config = config_clone.clone();
-            let client_id = client_id_clone.clone();
-            let bridge = bridge_clone.clone();
-            let write_channel = write_for_cb.clone();
-            let read_channel = read_for_cb.clone();
-            let channels_open = channels_open_clone.clone();
-
-            start_bridge(
-                channels_open,
-                config,
-                client_id,
-                bridge,
-                write_channel,
-                read_channel,
-            )
-        }));
-
-        // Setup read channel on_open
-        let config_clone = config.clone();
-        let client_id_clone = client_id.clone();
-        let bridge_clone = bridge.clone();
-        let write_for_cb = write_channel_for_bridge;
-        let read_for_cb = read_channel_for_bridge;
-        let channels_open_clone = channels_open;
-
-        read_channel.on_open(Box::new(move || {
-            let config = config_clone.clone();
-            let client_id = client_id_clone.clone();
-            let bridge = bridge_clone.clone();
-            let write_channel = write_for_cb.clone();
-            let read_channel = read_for_cb.clone();
-            let channels_open = channels_open_clone.clone();
-
-            start_bridge(
-                channels_open,
-                config,
-                client_id,
-                bridge,
-                write_channel,
-                read_channel,
-            )
-        }));
-    }
-
-    // Send ICE candidates to client
+    match Bridge::new(
+        write_channel,
+        read_channel,
+        &config.server,
+        client_id.clone(),
+    )
+    .await
     {
+        Ok(b) => {
+            let b = Arc::new(b);
+            *bridge.lock().await = Some(b.clone());
+            tokio::spawn(async move {
+                b.start().await;
+            });
+        }
+        Err(e) => {
+            error!(client_id = %client_id, error = %e, "Failed to create bridge");
+        }
+    }
+}
+
+/// Setup ICE candidate handler to send candidates to the client
+fn setup_ice_handler(peer: &Arc<RTCPeerConnection>, ws_sender: WsSender, client_id: String) {
+    peer.on_ice_candidate(Box::new(move |candidate| {
         let ws_sender = ws_sender.clone();
         let client_id = client_id.clone();
 
-        peer.on_ice_candidate(Box::new(move |candidate| {
-            let ws_sender = ws_sender.clone();
-            let client_id = client_id.clone();
+        Box::pin(async move {
+            let Some(c) = candidate else {
+                return;
+            };
 
-            Box::pin(async move {
-                if let Some(c) = candidate {
-                    match c.to_json() {
-                        Ok(json) => {
-                            let msg = SignalMessage {
-                                event: "candidate".to_string(),
-                                data: serde_json::to_value(json).unwrap_or_default(),
-                            };
+            match c.to_json() {
+                Ok(json) => {
+                    let msg = SignalMessage {
+                        event: events::CANDIDATE.to_string(),
+                        data: serde_json::to_value(json).unwrap_or_default(),
+                    };
 
-                            debug!(client_id = %client_id, "Sending ICE candidate");
+                    debug!(client_id = %client_id, "Sending ICE candidate");
 
-                            let json_str = serde_json::to_string(&msg).unwrap_or_default();
-                            let mut sender = ws_sender.lock().await;
-                            if let Err(e) = sender.send(Message::Text(json_str)).await {
-                                error!(client_id = %client_id, error = %e, "Failed to send ICE candidate");
-                            }
-                        }
-                        Err(e) => {
-                            error!(client_id = %client_id, error = %e, "Failed to serialize ICE candidate");
-                        }
+                    let json_str = serde_json::to_string(&msg).unwrap_or_default();
+                    let mut sender = ws_sender.lock().await;
+                    if let Err(e) = sender.send(Message::Text(json_str)).await {
+                        error!(client_id = %client_id, error = %e, "Failed to send ICE candidate");
                     }
                 }
-            })
-        }));
-    }
+                Err(e) => {
+                    error!(client_id = %client_id, error = %e, "Failed to serialize ICE candidate");
+                }
+            }
+        })
+    }));
+}
 
-    // Monitor connection state
-    {
+/// Setup connection state change handler
+fn setup_connection_monitor(
+    peer: &Arc<RTCPeerConnection>,
+    bridge: BridgeHolder,
+    client_id: String,
+) {
+    peer.on_peer_connection_state_change(Box::new(move |state| {
         let client_id = client_id.clone();
         let bridge = bridge.clone();
 
-        peer.on_peer_connection_state_change(Box::new(move |state| {
-            let client_id = client_id.clone();
-            let bridge = bridge.clone();
+        Box::pin(async move {
+            info!(client_id = %client_id, state = ?state, "Peer connection state changed");
 
-            Box::pin(async move {
-                info!(client_id = %client_id, state = ?state, "Peer connection state changed");
-
-                match state {
-                    RTCPeerConnectionState::Failed
-                    | RTCPeerConnectionState::Disconnected
-                    | RTCPeerConnectionState::Closed => {
-                        if let Some(b) = bridge.lock().await.take() {
-                            b.shutdown();
-                        }
+            match state {
+                RTCPeerConnectionState::Failed
+                | RTCPeerConnectionState::Disconnected
+                | RTCPeerConnectionState::Closed => {
+                    if let Some(b) = bridge.lock().await.take() {
+                        b.shutdown();
                     }
-                    _ => {}
                 }
-            })
-        }));
-    }
+                _ => {}
+            }
+        })
+    }));
+}
 
-    // Create and send offer
+/// Create and send WebRTC offer to client
+async fn send_offer(peer: &Arc<RTCPeerConnection>, ws_sender: &WsSender, client_id: &str) -> bool {
     let offer = match peer.create_offer(None).await {
         Ok(o) => o,
         Err(e) => {
             error!(client_id = %client_id, error = %e, "Failed to create offer");
-            return;
+            return false;
         }
     };
 
     if let Err(e) = peer.set_local_description(offer.clone()).await {
         error!(client_id = %client_id, error = %e, "Failed to set local description");
-        return;
+        return false;
     }
 
-    // Send offer to client
     let offer_msg = SignalMessage {
-        event: "offer".to_string(),
+        event: events::OFFER.to_string(),
         data: serde_json::json!({
-            "type": "offer",
+            "type": events::OFFER,
             "sdp": offer.sdp
         }),
     };
 
-    {
-        let json_str = serde_json::to_string(&offer_msg).unwrap_or_default();
-        let mut sender = ws_sender.lock().await;
-        if let Err(e) = sender.send(Message::Text(json_str)).await {
-            error!(client_id = %client_id, error = %e, "Failed to send offer");
-            return;
-        }
+    let json_str = serde_json::to_string(&offer_msg).unwrap_or_default();
+    let mut sender = ws_sender.lock().await;
+    if let Err(e) = sender.send(Message::Text(json_str)).await {
+        error!(client_id = %client_id, error = %e, "Failed to send offer");
+        return false;
     }
 
     info!(client_id = %client_id, "Sent WebRTC offer");
-
-    // Handle incoming WebSocket messages
-    handle_ws_messages(ws_receiver, peer, client_id.clone()).await;
-
-    // Cleanup
-    if let Some(b) = bridge.lock().await.take() {
-        b.shutdown();
-    }
-
-    info!(client_id = %client_id, "WebSocket connection closed");
+    true
 }
 
 /// Handle incoming WebSocket messages (answer, candidates)
@@ -300,36 +337,11 @@ async fn handle_ws_messages(
                 };
 
                 match signal.event.as_str() {
-                    "answer" => {
-                        debug!(client_id = %client_id, "Received answer");
-
-                        let sdp = signal
-                            .data
-                            .get("sdp")
-                            .and_then(|s| s.as_str())
-                            .unwrap_or("");
-                        let answer = RTCSessionDescription::answer(sdp.to_string()).unwrap();
-
-                        if let Err(e) = peer.set_remote_description(answer).await {
-                            error!(client_id = %client_id, error = %e, "Failed to set remote description");
-                        }
+                    events::ANSWER => {
+                        handle_answer(&peer, &signal, &client_id).await;
                     }
-                    "candidate" => {
-                        debug!(client_id = %client_id, "Received ICE candidate");
-
-                        let candidate: RTCIceCandidateInit = match serde_json::from_value(
-                            signal.data,
-                        ) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                warn!(client_id = %client_id, error = %e, "Invalid ICE candidate");
-                                continue;
-                            }
-                        };
-
-                        if let Err(e) = peer.add_ice_candidate(candidate).await {
-                            error!(client_id = %client_id, error = %e, "Failed to add ICE candidate");
-                        }
+                    events::CANDIDATE => {
+                        handle_candidate(&peer, signal.data, &client_id).await;
                     }
                     _ => {
                         warn!(client_id = %client_id, event = %signal.event, "Unknown signal event");
@@ -350,6 +362,46 @@ async fn handle_ws_messages(
                 break;
             }
         }
+    }
+}
+
+/// Handle SDP answer from client
+async fn handle_answer(peer: &Arc<RTCPeerConnection>, signal: &SignalMessage, client_id: &str) {
+    debug!(client_id = %client_id, "Received answer");
+
+    let sdp = signal
+        .data
+        .get("sdp")
+        .and_then(|s| s.as_str())
+        .unwrap_or("");
+
+    let answer = match RTCSessionDescription::answer(sdp.to_string()) {
+        Ok(a) => a,
+        Err(e) => {
+            error!(client_id = %client_id, error = %e, "Failed to parse SDP answer");
+            return;
+        }
+    };
+
+    if let Err(e) = peer.set_remote_description(answer).await {
+        error!(client_id = %client_id, error = %e, "Failed to set remote description");
+    }
+}
+
+/// Handle ICE candidate from client
+async fn handle_candidate(peer: &Arc<RTCPeerConnection>, data: serde_json::Value, client_id: &str) {
+    debug!(client_id = %client_id, "Received ICE candidate");
+
+    let candidate: RTCIceCandidateInit = match serde_json::from_value(data) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(client_id = %client_id, error = %e, "Invalid ICE candidate");
+            return;
+        }
+    };
+
+    if let Err(e) = peer.add_ice_candidate(candidate).await {
+        error!(client_id = %client_id, error = %e, "Failed to add ICE candidate");
     }
 }
 
