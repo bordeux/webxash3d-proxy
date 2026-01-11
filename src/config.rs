@@ -1,0 +1,52 @@
+use clap::Parser;
+
+#[derive(Parser, Debug, Clone)]
+#[command(name = "webxash3d-proxy")]
+#[command(about = "WebRTC to UDP proxy for CS 1.6 / Half-Life servers")]
+pub struct Config {
+    /// CS 1.6 server address (e.g., 192.168.1.100:27015)
+    #[arg(short, long, env = "GAME_SERVER")]
+    pub server: String,
+
+    /// Port to listen for WebSocket/HTTP connections
+    #[arg(short, long, default_value = "27016", env = "LISTEN_PORT")]
+    pub port: u16,
+
+    /// Host to bind to
+    #[arg(long, default_value = "0.0.0.0", env = "LISTEN_HOST")]
+    pub host: String,
+
+    /// Public IP for ICE candidates (for NAT traversal)
+    #[arg(long, env = "PUBLIC_IP")]
+    pub public_ip: Option<String>,
+
+    /// Enable verbose logging
+    #[arg(short, long)]
+    pub verbose: bool,
+
+    /// Path to serve static files from (optional)
+    #[arg(long, env = "STATIC_DIR")]
+    pub static_dir: Option<String>,
+
+    /// Game directory name (e.g., "cstrike", "valve")
+    #[arg(long, default_value = "cstrike", env = "GAME_DIR")]
+    pub game_dir: String,
+
+    /// Extra console commands to execute on client start (comma-separated)
+    #[arg(long, env = "CONSOLE_COMMANDS")]
+    pub console_commands: Option<String>,
+}
+
+impl Config {
+    pub fn listen_addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
+    }
+
+    /// Get console commands as a vector
+    pub fn get_console_commands(&self) -> Vec<String> {
+        self.console_commands
+            .as_ref()
+            .map(|s| s.split(',').map(|cmd| cmd.trim().to_string()).collect())
+            .unwrap_or_default()
+    }
+}

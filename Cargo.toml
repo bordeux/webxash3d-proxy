@@ -1,0 +1,31 @@
+[package]
+name = "webxash3d-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "WebRTC to UDP proxy for CS 1.6 / Half-Life"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# WebRTC
+webrtc = "0.11"
+
+# WebSocket
+axum = { version = "0.7", features = ["ws"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+futures = "0.3"
+bytes = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dashmap = "5"
+uuid = { version = "1", features = ["v4"] }
+
+# CLI args
+clap = { version = "4", features = ["derive", "env"] }
