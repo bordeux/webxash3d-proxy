@@ -1,3 +1,8 @@
+//! WebRTC to UDP proxy for CS 1.6 / Half-Life game servers.
+//!
+//! This proxy enables browser clients to connect to traditional game servers
+//! by bridging WebRTC data channels to UDP sockets.
+
 mod bridge;
 mod config;
 mod signaling;
@@ -95,9 +100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Optionally serve static files
     if let Some(ref static_dir) = config.static_dir {
         info!("Serving static files from: {}", static_dir);
-        app = app.fallback_service(
-            ServeDir::new(static_dir).append_index_html_on_directories(true),
-        );
+        app =
+            app.fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true));
     }
 
     // Start server
@@ -126,7 +130,7 @@ async fn health_handler() -> &'static str {
 }
 
 /// Client configuration endpoint
-/// Returns configuration needed by the Xash3D WASM client
+/// Returns configuration needed by the `Xash3D` WASM client
 async fn config_handler(State(state): State<AppState>) -> Json<ClientConfig> {
     let game_dir = &state.config.game_dir;
 
@@ -136,11 +140,11 @@ async fn config_handler(State(state): State<AppState>) -> Json<ClientConfig> {
     // Map server library requests (engine requests .so, we serve .wasm)
     files_map.insert(
         "dlls/cs_emscripten_wasm32.so".to_string(),
-        format!("/{}/dlls/cs_emscripten_wasm32.wasm", game_dir),
+        format!("/{game_dir}/dlls/cs_emscripten_wasm32.wasm"),
     );
     files_map.insert(
         "dlls/hl_emscripten_wasm32.so".to_string(),
-        format!("/{}/dlls/cs_emscripten_wasm32.wasm", game_dir),
+        format!("/{game_dir}/dlls/cs_emscripten_wasm32.wasm"),
     );
     files_map.insert(
         "/rwdir/filesystem_stdio.wasm".to_string(),
@@ -148,16 +152,20 @@ async fn config_handler(State(state): State<AppState>) -> Json<ClientConfig> {
     );
 
     Json(ClientConfig {
-        arguments: vec!["-windowed".to_string(), "-game".to_string(), game_dir.clone()],
+        arguments: vec![
+            "-windowed".to_string(),
+            "-game".to_string(),
+            game_dir.clone(),
+        ],
         console: state.config.get_console_commands(),
         game_dir: game_dir.clone(),
         libraries: ClientLibraries {
             // These paths are relative to the static directory
             // The client will load them from these URLs
-            client: format!("/{}/cl_dlls/client_emscripten_wasm32.wasm", game_dir),
-            server: format!("/{}/dlls/cs_emscripten_wasm32.wasm", game_dir),
-            extras: format!("/{}/extras.pk3", game_dir),
-            menu: format!("/{}/cl_dlls/menu_emscripten_wasm32.wasm", game_dir),
+            client: format!("/{game_dir}/cl_dlls/client_emscripten_wasm32.wasm"),
+            server: format!("/{game_dir}/dlls/cs_emscripten_wasm32.wasm"),
+            extras: format!("/{game_dir}/extras.pk3"),
+            menu: format!("/{game_dir}/cl_dlls/menu_emscripten_wasm32.wasm"),
             filesystem: "/filesystem_stdio.wasm".to_string(),
         },
         dynamic_libraries: vec![

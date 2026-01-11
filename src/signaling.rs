@@ -30,6 +30,7 @@ struct SignalMessage {
 }
 
 /// Handle a new WebSocket connection for WebRTC signaling
+#[allow(clippy::too_many_lines)]
 pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id: String) {
     info!(client_id = %client_id, "New WebSocket connection");
 
@@ -53,7 +54,10 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
     };
 
     // Create "write" channel - for sending data TO the browser
-    let write_channel = match peer.create_data_channel("write", Some(dc_options.clone())).await {
+    let write_channel = match peer
+        .create_data_channel("write", Some(dc_options.clone()))
+        .await
+    {
         Ok(dc) => dc,
         Err(e) => {
             error!(client_id = %client_id, error = %e, "Failed to create write channel");
@@ -96,8 +100,13 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
                 if count == 2 {
                     info!(client_id = %client_id, "Both channels open, starting bridge");
 
-                    match Bridge::new(write_channel, read_channel, &config.server, client_id.clone())
-                        .await
+                    match Bridge::new(
+                        write_channel,
+                        read_channel,
+                        &config.server,
+                        client_id.clone(),
+                    )
+                    .await
                     {
                         Ok(b) => {
                             let b = Arc::new(b);
@@ -189,7 +198,7 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
 
                             let json_str = serde_json::to_string(&msg).unwrap_or_default();
                             let mut sender = ws_sender.lock().await;
-                            if let Err(e) = sender.send(Message::Text(json_str.into())).await {
+                            if let Err(e) = sender.send(Message::Text(json_str)).await {
                                 error!(client_id = %client_id, error = %e, "Failed to send ICE candidate");
                             }
                         }
@@ -254,7 +263,7 @@ pub async fn handle_websocket(socket: WebSocket, config: Arc<Config>, client_id:
     {
         let json_str = serde_json::to_string(&offer_msg).unwrap_or_default();
         let mut sender = ws_sender.lock().await;
-        if let Err(e) = sender.send(Message::Text(json_str.into())).await {
+        if let Err(e) = sender.send(Message::Text(json_str)).await {
             error!(client_id = %client_id, error = %e, "Failed to send offer");
             return;
         }
@@ -294,7 +303,11 @@ async fn handle_ws_messages(
                     "answer" => {
                         debug!(client_id = %client_id, "Received answer");
 
-                        let sdp = signal.data.get("sdp").and_then(|s| s.as_str()).unwrap_or("");
+                        let sdp = signal
+                            .data
+                            .get("sdp")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("");
                         let answer = RTCSessionDescription::answer(sdp.to_string()).unwrap();
 
                         if let Err(e) = peer.set_remote_description(answer).await {
@@ -304,14 +317,15 @@ async fn handle_ws_messages(
                     "candidate" => {
                         debug!(client_id = %client_id, "Received ICE candidate");
 
-                        let candidate: RTCIceCandidateInit =
-                            match serde_json::from_value(signal.data) {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    warn!(client_id = %client_id, error = %e, "Invalid ICE candidate");
-                                    continue;
-                                }
-                            };
+                        let candidate: RTCIceCandidateInit = match serde_json::from_value(
+                            signal.data,
+                        ) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                warn!(client_id = %client_id, error = %e, "Invalid ICE candidate");
+                                continue;
+                            }
+                        };
 
                         if let Err(e) = peer.add_ice_candidate(candidate).await {
                             error!(client_id = %client_id, error = %e, "Failed to add ICE candidate");

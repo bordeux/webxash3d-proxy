@@ -5,7 +5,7 @@ use tracing::{debug, error, info};
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 
-/// Maximum packet size for GoldSrc protocol
+/// Maximum packet size for `GoldSrc` protocol
 const MAX_PACKET_SIZE: usize = 65536;
 
 /// Bridge between WebRTC data channels and UDP socket to game server
@@ -118,7 +118,7 @@ impl Bridge {
                         }
                     }
                 }
-                _ = self.shutdown.notified() => {
+                () = self.shutdown.notified() => {
                     break;
                 }
             }
@@ -132,27 +132,28 @@ impl Bridge {
         let shutdown = self.shutdown.clone();
 
         // Handle incoming messages on the read channel
-        self.read_channel.on_message(Box::new(move |msg: DataChannelMessage| {
-            let udp_socket = udp_socket.clone();
-            let client_id = client_id.clone();
+        self.read_channel
+            .on_message(Box::new(move |msg: DataChannelMessage| {
+                let udp_socket = udp_socket.clone();
+                let client_id = client_id.clone();
 
-            Box::pin(async move {
-                let data = msg.data;
-                debug!(
-                    client_id = %client_id,
-                    bytes = data.len(),
-                    "WebRTC (read channel) → UDP"
-                );
-
-                if let Err(e) = udp_socket.send(&data).await {
-                    error!(
+                Box::pin(async move {
+                    let data = msg.data;
+                    debug!(
                         client_id = %client_id,
-                        error = %e,
-                        "Failed to send to UDP"
+                        bytes = data.len(),
+                        "WebRTC (read channel) → UDP"
                     );
-                }
-            })
-        }));
+
+                    if let Err(e) = udp_socket.send(&data).await {
+                        error!(
+                            client_id = %client_id,
+                            error = %e,
+                            "Failed to send to UDP"
+                        );
+                    }
+                })
+            }));
 
         // Handle read channel close
         let shutdown_clone = shutdown.clone();
