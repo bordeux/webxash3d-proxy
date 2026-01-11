@@ -39,7 +39,7 @@ struct SignalMessage {
     data: serde_json::Value,
 }
 
-/// Type alias for the WebSocket sender wrapped in Arc<Mutex>
+/// Type alias for the WebSocket sender wrapped in `Arc<Mutex>`
 type WsSender = Arc<Mutex<futures::stream::SplitSink<WebSocket, Message>>>;
 
 /// Type alias for the bridge holder
