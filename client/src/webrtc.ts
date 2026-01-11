@@ -1,5 +1,10 @@
 import {Net, Packet, Xash3D, Xash3DOptions} from "xash3d-fwgs";
 
+export interface Xash3DWebRTCOptions extends Xash3DOptions {
+    proxyHost: string;
+    proxyPort: number;
+}
+
 export class Xash3DWebRTC extends Xash3D {
     private channel?: RTCDataChannel
     private resolve?: (value?: unknown) => void
@@ -10,10 +15,25 @@ export class Xash3DWebRTC extends Xash3D {
     private wasRemote = false
     private timeout?: ReturnType<typeof setTimeout>
     private stream?: MediaStream
+    private proxyHost: string
+    private proxyPort: number
+    private proxyIp: [number, number, number, number]
 
-    constructor(opts?: Xash3DOptions) {
+    constructor(opts: Xash3DWebRTCOptions) {
         super(opts);
         this.net = new Net(this)
+        this.proxyHost = opts.proxyHost
+        this.proxyPort = opts.proxyPort
+        this.proxyIp = this.parseIp(opts.proxyHost)
+    }
+
+    private parseIp(host: string): [number, number, number, number] {
+        const parts = host.split('.').map(Number)
+        if (parts.length === 4 && parts.every(p => p >= 0 && p <= 255)) {
+            return parts as [number, number, number, number]
+        }
+        // Default to 127.0.0.1 for non-IP hostnames
+        return [127, 0, 0, 1]
     }
 
     async init() {
@@ -67,8 +87,8 @@ export class Xash3DWebRTC extends Xash3D {
             if (e.channel.label === 'write') {
                 e.channel.onmessage = (ee) => {
                     const packet: Packet = {
-                        ip: [127, 0, 0, 1],
-                        port: 27016,
+                        ip: this.proxyIp,
+                        port: this.proxyPort,
                         data: ee.data
                     }
                     if (ee.data.arrayBuffer) {

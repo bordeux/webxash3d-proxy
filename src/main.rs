@@ -45,6 +45,8 @@ struct ClientConfig {
     libraries: ClientLibraries,
     dynamic_libraries: Vec<String>,
     files_map: std::collections::HashMap<String, String>,
+    proxy_host: String,
+    proxy_port: u16,
 }
 
 #[derive(Serialize)]
@@ -239,6 +241,13 @@ async fn config_handler(State(state): State<AppState>) -> Json<ClientConfig> {
         "/filesystem_stdio.wasm".to_string(),
     );
 
+    // Use public_ip if provided, otherwise use host
+    let proxy_host = state
+        .config
+        .public_ip
+        .clone()
+        .unwrap_or_else(|| state.config.host.clone());
+
     Json(ClientConfig {
         arguments: vec![
             "-windowed".to_string(),
@@ -261,5 +270,7 @@ async fn config_handler(State(state): State<AppState>) -> Json<ClientConfig> {
             "/rwdir/filesystem_stdio.wasm".to_string(),
         ],
         files_map,
+        proxy_host,
+        proxy_port: state.config.port,
     })
 }

@@ -145,9 +145,13 @@ Returns configuration for the web client:
     "dlls/cs_emscripten_wasm32.so": "/cstrike/dlls/cs_emscripten_wasm32.wasm",
     "dlls/hl_emscripten_wasm32.so": "/cstrike/dlls/cs_emscripten_wasm32.wasm",
     "/rwdir/filesystem_stdio.wasm": "/filesystem_stdio.wasm"
-  }
+  },
+  "proxy_host": "192.168.1.100",
+  "proxy_port": 27016
 }
 ```
+
+Note: `proxy_host` uses `--public-ip` if provided, otherwise falls back to `--host`.
 
 ### WebSocket Signaling
 ```json

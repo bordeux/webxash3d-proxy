@@ -59,6 +59,8 @@ async function main() {
         };
         dynamic_libraries: string[];
         files_map: Record<string, string>;
+        proxy_host: string;
+        proxy_port: number;
     }>
 
     // Use URLs directly from server config (no imports needed)
@@ -77,6 +79,8 @@ async function main() {
         },
         dynamicLibraries: config.dynamic_libraries,
         filesMap: config.files_map,
+        proxyHost: config.proxy_host,
+        proxyPort: config.proxy_port,
     });
 
     const [zip, extras] = await Promise.all([
@@ -123,7 +127,7 @@ async function main() {
         })
     }
     
-    x.Cmd_ExecuteString('connect 127.0.0.1:27016')
+    x.Cmd_ExecuteString(`connect ${config.proxy_host}:${config.proxy_port}`)
 
     window.addEventListener('beforeunload', (event) => {
         event.preventDefault();
