@@ -1,6 +1,6 @@
 [package]
 name = "webxash3d-proxy"
-version = "0.0.1"
+version = "1.0.0"
 edition = "2021"
 description = "WebRTC to UDP proxy for CS 1.6 / Half-Life"
 
