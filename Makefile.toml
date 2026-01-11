@@ -1,0 +1,140 @@
+[config]
+default_to_workspace = false
+
+[env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
+
+# =============================================================================
+# Main Tasks
+# =============================================================================
+
+[tasks.default]
+alias = "build"
+
+[tasks.build]
+description = "Build client and Rust binary"
+dependencies = ["build-client", "build-rust"]
+
+[tasks.build-release]
+description = "Build client and Rust binary in release mode"
+dependencies = ["build-client", "build-rust-release"]
+
+# =============================================================================
+# Client Tasks
+# =============================================================================
+
+[tasks.nvm-use]
+description = "Switch to Node.js version from .nvmrc"
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use || nvm install
+'''
+
+[tasks.build-client]
+description = "Build the TypeScript client"
+dependencies = ["install-client"]
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use
+cd client && npm run build
+'''
+
+[tasks.install-client]
+description = "Install client dependencies"
+condition = { files_not_exist = ["./client/node_modules"] }
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use || nvm install
+cd client && npm install
+'''
+
+[tasks.dev-client]
+description = "Run client dev server"
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use
+cd client && npm run dev
+'''
+
+# =============================================================================
+# Rust Tasks
+# =============================================================================
+
+[tasks.build-rust]
+description = "Build Rust binary (debug)"
+command = "cargo"
+args = ["build"]
+
+[tasks.build-rust-release]
+description = "Build Rust binary (release)"
+command = "cargo"
+args = ["build", "--release"]
+
+# =============================================================================
+# Development Tasks
+# =============================================================================
+
+[tasks.dev]
+description = "Run proxy in development mode with static-dir"
+dependencies = ["build-client"]
+command = "cargo"
+args = ["run", "--", "--static-dir", "./dist", "-v", "${@}"]
+
+[tasks.run]
+description = "Run proxy with embedded assets"
+dependencies = ["build"]
+command = "cargo"
+args = ["run", "--release", "--", "${@}"]
+
+# =============================================================================
+# Quality Assurance
+# =============================================================================
+
+[tasks.check]
+description = "Run all checks"
+dependencies = ["fmt-check", "clippy", "test"]
+
+[tasks.fmt]
+description = "Format Rust code"
+command = "cargo"
+args = ["fmt"]
+
+[tasks.fmt-check]
+description = "Check Rust code formatting"
+command = "cargo"
+args = ["fmt", "--check"]
+
+[tasks.clippy]
+description = "Run Clippy lints"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.test]
+description = "Run tests"
+command = "cargo"
+args = ["test"]
+
+# =============================================================================
+# Clean Tasks
+# =============================================================================
+
+[tasks.clean]
+description = "Clean all build artifacts"
+dependencies = ["clean-rust", "clean-client"]
+
+[tasks.clean-rust]
+description = "Clean Rust build artifacts"
+command = "cargo"
+args = ["clean"]
+
+[tasks.clean-client]
+description = "Clean client build artifacts"
+script = ["rm -rf dist", "rm -rf client/node_modules"]
