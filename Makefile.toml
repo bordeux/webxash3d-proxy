@@ -23,25 +23,46 @@ dependencies = ["build-client", "build-rust-release"]
 # Client Tasks
 # =============================================================================
 
+[tasks.nvm-use]
+description = "Switch to Node.js version from .nvmrc"
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use || nvm install
+'''
+
 [tasks.build-client]
 description = "Build the TypeScript client"
-cwd = "./client"
-command = "npm"
-args = ["run", "build"]
 dependencies = ["install-client"]
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use
+cd client && npm run build
+'''
 
 [tasks.install-client]
 description = "Install client dependencies"
-cwd = "./client"
-command = "npm"
-args = ["install"]
 condition = { files_not_exist = ["./client/node_modules"] }
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use || nvm install
+cd client && npm install
+'''
 
 [tasks.dev-client]
 description = "Run client dev server"
-cwd = "./client"
-command = "npm"
-args = ["run", "dev"]
+script = '''
+#!/usr/bin/env bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+nvm use
+cd client && npm run dev
+'''
 
 # =============================================================================
 # Rust Tasks
