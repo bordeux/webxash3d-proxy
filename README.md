@@ -106,24 +106,25 @@ Open `http://localhost:27016` in your browser.
 
 ### Option 2: Build from Source
 
-#### 1. Build the web client
+#### Prerequisites
+
+- Rust toolchain
+- Node.js and npm
+- [cargo-make](https://github.com/sagiegurari/cargo-make): `cargo install cargo-make`
+
+#### 1. Add valve.zip
 
 ```bash
-cd client
-npm install
-
-# Add valve.zip (Half-Life base assets)
 # Create from your Half-Life installation:
 cd /path/to/Half-Life && zip -r valve.zip valve/
 cp valve.zip /path/to/webxash3d-proxy/client/src/
-
-npm run build
 ```
 
-#### 2. Build the proxy
+#### 2. Build everything
 
 ```bash
-cargo build --release
+# Build client + Rust binary (release)
+cargo make build-release
 ```
 
 #### 3. Run
@@ -139,6 +140,26 @@ cargo build --release
     --server 192.168.1.100:27015 \
     --static-dir ./dist
 ```
+
+### Build Tasks (cargo-make)
+
+| Task | Description |
+|------|-------------|
+| `cargo make` | Build client + Rust (debug) |
+| `cargo make build-release` | Build client + Rust (release) |
+| `cargo make dev` | Build client, run proxy with `--static-dir` |
+| `cargo make check` | Run fmt, clippy, and tests |
+| `cargo make clean` | Clean all build artifacts |
+
+Individual tasks:
+
+| Task | Description |
+|------|-------------|
+| `cargo make build-client` | Build TypeScript client only |
+| `cargo make build-rust` | Build Rust binary only (debug) |
+| `cargo make dev-client` | Run Vite dev server |
+| `cargo make fmt` | Format Rust code |
+| `cargo make clippy` | Run Clippy lints |
 
 ## CLI Options
 
@@ -231,6 +252,7 @@ webxash3d-proxy/
 │   └── publish.yml             # GitHub releases
 ├── dist/                       # Built client output
 ├── Cargo.toml
+├── Makefile.toml               # cargo-make build tasks
 └── Dockerfile
 ```
 
@@ -274,11 +296,12 @@ docker run -p 27016:27016 \
 ## Development
 
 ```bash
-# Proxy (with hot reload)
-cargo run -- --server 127.0.0.1:27015 -v --static-dir ./dist
+# Build and run in dev mode (static-dir)
+cargo make dev -- --server 127.0.0.1:27015
 
-# Client (Vite dev server)
-cd client && npm run dev
+# Or run client and proxy separately:
+cargo make dev-client    # Vite dev server (in one terminal)
+cargo run -- --server 127.0.0.1:27015 -v --static-dir ./dist  # Proxy (in another)
 ```
 
 ## NPM Packages
