@@ -1,5 +1,8 @@
+//! CLI configuration and argument parsing.
+
 use clap::Parser;
 
+/// WebRTC to UDP proxy for CS 1.6 / Half-Life servers
 #[derive(Parser, Debug, Clone)]
 #[command(name = "webxash3d-proxy")]
 #[command(about = "WebRTC to UDP proxy for CS 1.6 / Half-Life servers")]
@@ -24,8 +27,12 @@ pub struct Config {
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Path to serve static files from (optional)
-    #[arg(long, env = "STATIC_DIR")]
+    /// Path to valve.zip game package file
+    #[arg(long, env = "PACKAGE_ZIP")]
+    pub package_zip: Option<String>,
+
+    /// Path to serve static files from (development mode, overrides embedded assets)
+    #[arg(long, env = "STATIC_DIR", hide = true)]
     pub static_dir: Option<String>,
 
     /// Game directory name (e.g., "cstrike", "valve")
@@ -38,6 +45,7 @@ pub struct Config {
 }
 
 impl Config {
+    /// Get the listen address as a string
     pub fn listen_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
@@ -48,5 +56,10 @@ impl Config {
             .as_ref()
             .map(|s| s.split(',').map(|cmd| cmd.trim().to_string()).collect())
             .unwrap_or_default()
+    }
+
+    /// Check if using embedded assets (no `static_dir` override)
+    pub fn use_embedded_assets(&self) -> bool {
+        self.static_dir.is_none()
     }
 }

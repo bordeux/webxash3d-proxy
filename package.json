@@ -1,0 +1,34 @@
+{
+  "name": "webxash3d-proxy",
+  "version": "0.0.0-development",
+  "description": "WebRTC to UDP proxy for CS 1.6 / Half-Life servers",
+  "private": true,
+  "scripts": {
+    "prepare": "husky install || true",
+    "test:commit": "commitlint --from=HEAD~1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aspect-apps/webxash3d-proxy.git"
+  },
+  "keywords": [
+    "webrtc",
+    "proxy",
+    "cs16",
+    "half-life",
+    "rust"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@commitlint/cli": "^18.4.3",
+    "@commitlint/config-conventional": "^18.4.3",
+    "husky": "^8.0.3"
+  },
+  "dependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "conventional-changelog-conventionalcommits": "^7.0.2",
+    "semantic-release": "^25.0.2"
+  }
+}

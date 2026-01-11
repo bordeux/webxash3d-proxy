@@ -1,5 +1,14 @@
 # CLAUDE.md - AI Assistant Context
 
+## Git Commits
+
+**Do not include Claude/AI information in commits.** Specifically:
+- No "Generated with Claude Code" footer
+- No "Co-Authored-By: Claude" lines
+- No AI-related mentions in commit messages
+
+Use conventional commits format: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, etc.
+
 ## Project Summary
 
 **webxash3d-proxy** is a Rust WebRTC-to-UDP proxy that allows browser clients to play CS 1.6 / Half-Life on real game servers. It consists of:

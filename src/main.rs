@@ -3,26 +3,29 @@
 //! This proxy enables browser clients to connect to traditional game servers
 //! by bridging WebRTC data channels to UDP sockets.
 
+mod assets;
 mod bridge;
 mod config;
 mod signaling;
 
 use std::sync::Arc;
 
+use axum::body::Body;
+use axum::extract::State;
+use axum::http::{header, Request, Response, StatusCode};
 use axum::{
-    extract::{
-        ws::{WebSocket, WebSocketUpgrade},
-        State,
-    },
+    extract::ws::{WebSocket, WebSocketUpgrade},
     response::IntoResponse,
     routing::get,
     Json, Router,
 };
 use clap::Parser;
 use serde::Serialize;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 use config::Config;
@@ -79,12 +82,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Public IP for ICE: {}", ip);
     }
 
+    if let Some(ref package_zip) = config.package_zip {
+        info!("Package ZIP: {}", package_zip);
+    } else {
+        warn!("No --package-zip specified, valve.zip will not be available");
+    }
+
+    if config.use_embedded_assets() {
+        info!("Serving embedded assets");
+    } else if let Some(ref static_dir) = config.static_dir {
+        info!("Development mode: serving static files from {}", static_dir);
+    }
+
     let state = AppState {
         config: Arc::new(config.clone()),
     };
 
-    // Build router
-    let mut app = Router::new()
+    // Build router with API routes
+    let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/websocket", get(ws_handler))
         .route("/health", get(health_handler))
@@ -95,14 +110,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .allow_methods(Any)
                 .allow_headers(Any),
         )
-        .with_state(state);
+        .with_state(state.clone());
 
-    // Optionally serve static files
-    if let Some(ref static_dir) = config.static_dir {
-        info!("Serving static files from: {}", static_dir);
-        app =
-            app.fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true));
-    }
+    // Add static file serving
+    let app = if let Some(ref static_dir) = config.static_dir {
+        // Development mode: serve from filesystem
+        app.fallback_service(ServeDir::new(static_dir).append_index_html_on_directories(true))
+    } else {
+        // Production mode: serve embedded assets + package_zip for valve.zip
+        app.fallback(move |request: Request<Body>| {
+            let state = state.clone();
+            let path = request.uri().path().to_string();
+            async move { serve_static(path, state).await }
+        })
+    };
 
     // Start server
     let listener = tokio::net::TcpListener::bind(config.listen_addr()).await?;
@@ -111,6 +132,73 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Serve static files from embedded assets or `package_zip`
+async fn serve_static(path: String, state: AppState) -> Response<Body> {
+    // Normalize path - remove leading slash
+    let path = path.trim_start_matches('/');
+
+    // Handle valve.zip specially - serve from package_zip path
+    if path == "valve.zip" {
+        return serve_package_zip(&state).await;
+    }
+
+    // Serve from embedded assets
+    assets::serve_embedded(path)
+}
+
+/// Serve valve.zip from the `package_zip` path
+async fn serve_package_zip(state: &AppState) -> Response<Body> {
+    let Some(ref package_path) = state.config.package_zip else {
+        return Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("valve.zip not configured (use --package-zip)"))
+            .expect("building response should not fail");
+    };
+
+    // Read the file
+    let mut file = match File::open(package_path).await {
+        Ok(f) => f,
+        Err(e) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from(format!("Failed to open valve.zip: {e}")))
+                .expect("building response should not fail");
+        }
+    };
+
+    // Get file size for Content-Length
+    let metadata = match file.metadata().await {
+        Ok(m) => m,
+        Err(e) => {
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(format!("Failed to read file metadata: {e}")))
+                .expect("building response should not fail");
+        }
+    };
+
+    // Read file contents
+    #[allow(clippy::cast_possible_truncation)]
+    let mut contents = Vec::with_capacity(metadata.len() as usize);
+    if let Err(e) = file.read_to_end(&mut contents).await {
+        return Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from(format!("Failed to read valve.zip: {e}")))
+            .expect("building response should not fail");
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(header::CONTENT_LENGTH, contents.len())
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"valve.zip\"",
+        )
+        .body(Body::from(contents))
+        .expect("building response should not fail")
 }
 
 /// WebSocket upgrade handler
